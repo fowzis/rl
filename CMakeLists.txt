@@ -38,7 +38,7 @@ if(WIN32)
 endif()
 
 if(MSVC)
-	option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
+	option(BUILD_SHARED_LIBS "Build shared libraries (DLLs)" ON)
 else()
 	option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 endif()

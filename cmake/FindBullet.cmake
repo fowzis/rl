@@ -29,7 +29,28 @@ foreach(component IN LISTS Bullet_FIND_COMPONENTS)
 	select_library_configurations(BULLET_${COMPONENT})
 endforeach()
 
-if(BULLET_INCLUDE_DIR AND BULLET_BULLETCOLLISION_LIBRARY AND BULLET_LINEARMATH_LIBRARY)
+# Check for BulletConfig.cmake first (preferred method)
+# This is more reliable than runtime tests, especially for static libraries
+find_file(
+	BULLET_CONFIG_FILE
+	NAMES BulletConfig.cmake
+	PATHS ${BULLET_INCLUDE_DIR}/../lib/cmake/bullet ${CMAKE_PREFIX_PATH}/lib/cmake/bullet
+	NO_DEFAULT_PATH
+)
+
+if(BULLET_CONFIG_FILE)
+	# Read BULLET_DEFINITIONS from BulletConfig.cmake without including it
+	# (to avoid variable conflicts)
+	file(STRINGS ${BULLET_CONFIG_FILE} _BULLET_DEFINITIONS_LINE REGEX "^set[ \t]*\\([ \t]*BULLET_DEFINITIONS")
+	if(_BULLET_DEFINITIONS_LINE MATCHES "BT_USE_DOUBLE_PRECISION")
+		set(_BULLET_INTERFACE_COMPILE_DEFINITIONS "BT_USE_DOUBLE_PRECISION")
+		set(BULLET_DEFINITIONS -DBT_USE_DOUBLE_PRECISION)
+	endif()
+	unset(_BULLET_DEFINITIONS_LINE)
+endif()
+
+# Fallback: runtime test if BulletConfig.cmake wasn't found or didn't specify
+if(NOT _BULLET_INTERFACE_COMPILE_DEFINITIONS AND BULLET_INCLUDE_DIR AND BULLET_BULLETCOLLISION_LIBRARY AND BULLET_LINEARMATH_LIBRARY)
 	cmake_push_check_state(RESET)
 	set(CMAKE_REQUIRED_DEFINITIONS -DBT_USE_DOUBLE_PRECISION)
 	set(CMAKE_REQUIRED_INCLUDES ${BULLET_INCLUDE_DIR})
