@@ -5,8 +5,9 @@
 set -e  # Exit on error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_PREFIX="${SCRIPT_DIR}/install"
-THIRD_PARTY_PREFIX="${SCRIPT_DIR}/../rl-3rdparty/install"
+RL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+INSTALL_PREFIX="${RL_ROOT}/install"
+THIRD_PARTY_PREFIX="$(cd "${RL_ROOT}/../rl-3rdparty" && pwd)/install"
 BUILD_TYPE="Release"
 SKIP_BUILD=false
 SKIP_INSTALL=false
@@ -73,8 +74,8 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --install-prefix <path>      Installation prefix (default: \$SCRIPT_DIR/install)"
-            echo "  --third-party-prefix <path>  Third-party dependencies prefix (default: \$SCRIPT_DIR/../rl-3rdparty/install)"
+            echo "  --install-prefix <path>      Installation prefix (default: \$RL_ROOT/install)"
+            echo "  --third-party-prefix <path>  Third-party dependencies prefix (default: \$RL_ROOT/../rl-3rdparty/install)"
             echo "  --build-type <type>          Build type: Release, Debug, RelWithDebInfo, MinSizeRel (default: Release)"
             echo "  --skip-build                 Skip building, only configure"
             echo "  --skip-install               Skip installation"
@@ -133,7 +134,7 @@ echo "  Build XML: $BUILD_XML"
 echo ""
 
 # Create build directory
-BUILD_DIR="${SCRIPT_DIR}/build"
+BUILD_DIR="${RL_ROOT}/build"
 if [ ! -d "$BUILD_DIR" ]; then
     echo "Creating build directory: $BUILD_DIR"
     mkdir -p "$BUILD_DIR"

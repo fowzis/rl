@@ -1,16 +1,22 @@
 @echo off
 REM Batch file wrapper to run build-rl.ps1 with execution policy bypass
 REM Builds Robotics Library (RL) project
+REM 
+REM Usage: build-rl.bat [parameters]
+REM Examples:
+REM   build-rl.bat                    - Build shared libraries (default)
+REM   build-rl.bat -BuildStatic      - Build static libraries
+REM   build-rl.bat -Clean -BuildStatic - Clean previous build and build static libraries
+REM   build-rl.bat -BuildStatic -Config Debug -Architecture x64
 
 set SCRIPT_DIR=%~dp0
-set LOG_DIR=%SCRIPT_DIR%logs
+set LOG_DIR=%SCRIPT_DIR%..\logs
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 REM Redirect output to log file while also displaying on console using PowerShell Tee-Object
 REM Generate timestamp and log file path entirely within PowerShell for reliability
-REM Use default install prefix (script directory\install) unless overridden
-REM Pass -SkipTranscript to prevent duplicate logging (batch handles logging via Tee-Object)
-PowerShell -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference='Continue'; $logDir = '%LOG_DIR%'; $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'; $logFile = Join-Path $logDir \"build-rl-batch-$timestamp.log\"; Write-Host \"Batch log: $logFile\"; & '%SCRIPT_DIR%build-rl.ps1' -SkipTranscript *>&1 | Tee-Object -FilePath $logFile; $exitCode = $LASTEXITCODE; exit $exitCode }"
+REM Pass all command-line arguments to the PowerShell script via wrapper
+PowerShell -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build-rl-wrapper.ps1" "%LOG_DIR%" %*
 
 set EXIT_CODE=%ERRORLEVEL%
 

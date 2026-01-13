@@ -1,9 +1,9 @@
 # PowerShell script to build Robotics Library (RL)
-# Usage: .\build-rl.ps1 [-InstallPrefix <path>] [-ThirdPartyPrefix <path>] [-VisualStudioVersion <version>] [-Architecture <x64|x86>] [-Config <Release|Debug>] [-BuildSharedLibs]
+# Usage: .\build-rl.ps1 [-InstallPrefix <path>] [-ThirdPartyPrefix <path>] [-VisualStudioVersion <version>] [-Architecture <x64|x86>] [-Config <Release|Debug>] [-BuildStatic] [-Clean]
 
 param(
-    [string]$InstallPrefix = "$PSScriptRoot\install",
-    [string]$ThirdPartyPrefix = "$PSScriptRoot\..\rl-3rdparty\install",
+    [string]$InstallPrefix = "",
+    [string]$ThirdPartyPrefix = "",
     [string]$VisualStudioVersion = "17",  # Visual Studio 2022
     [ValidateSet("x64", "x86")]
     [string]$Architecture = "x64",
@@ -11,6 +11,8 @@ param(
     [string]$Config = "Release",
     [switch]$SkipBuild,
     [switch]$SkipInstall,
+    [switch]$BuildStatic,  # Build static libraries instead of shared libraries (DLLs)
+    [switch]$Clean,  # Clean previous build/install/logs directories before building
     [int]$ParallelJobs = 0,  # 0 = use all available cores
     [switch]$BuildDemos = $true,
     [switch]$BuildExtras = $true,
@@ -18,26 +20,74 @@ param(
     [switch]$BuildTests = $false,
     [switch]$BuildUtil = $true,
     [switch]$BuildXml = $true,
-    [switch]$BuildSharedLibs = $true,  # Build shared libraries (DLLs) - enabled by default for C# interoperability
     [switch]$SkipTranscript  # Skip Start-Transcript when called from batch wrapper
 )
 
 $ErrorActionPreference = "Stop"
 
-# Setup logging
-$logDir = Join-Path $PSScriptRoot "logs"
+# Clean previous build, install, and logs if requested (do this BEFORE starting transcript)
+if ($Clean) {
+    Write-Host "Cleaning previous build artifacts..." -ForegroundColor Yellow
+    
+    # Remove build directory
+    $buildDir = Join-Path $RLRoot "build"
+    if (Test-Path $buildDir) {
+        Write-Host "  Removing build directory: $buildDir" -ForegroundColor Gray
+        Remove-Item -Path $buildDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $buildDir) {
+            Write-Host "  WARNING: Could not fully remove build directory. Some files may be locked." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Build directory removed." -ForegroundColor Green
+        }
+    }
+    
+    # Remove install directory
+    if (Test-Path $InstallPrefix) {
+        Write-Host "  Removing install directory: $InstallPrefix" -ForegroundColor Gray
+        Remove-Item -Path $InstallPrefix -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $InstallPrefix) {
+            Write-Host "  WARNING: Could not fully remove install directory. Some files may be locked." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Install directory removed." -ForegroundColor Green
+        }
+    }
+    
+    # Remove logs directory (but keep current session log if transcript is active)
+    $logDir = Join-Path $RLRoot "logs"
+    if (Test-Path $logDir) {
+        Write-Host "  Removing logs directory: $logDir" -ForegroundColor Gray
+        Remove-Item -Path $logDir -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $logDir) {
+            Write-Host "  WARNING: Could not fully remove logs directory. Some files may be locked." -ForegroundColor Yellow
+        } else {
+            Write-Host "  Logs directory removed." -ForegroundColor Green
+        }
+    }
+    
+    Write-Host "Cleanup complete!" -ForegroundColor Green
+    Write-Host ""
+}
+
+# Setup logging (after cleanup)
+    $logDir = Join-Path $RLRoot "logs"
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir | Out-Null
 }
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$logFile = Join-Path $logDir "build-rl-$timestamp.log"
 
 # Start transcript to capture all output (unless called from batch wrapper)
 $transcriptStarted = $false
 if (-not $SkipTranscript) {
+    $logFile = Join-Path $logDir "build-rl-$timestamp.log"
     Start-Transcript -Path $logFile -Append | Out-Null
     $transcriptStarted = $true
     Write-Host "Logging output to: $logFile" -ForegroundColor Gray
+    Write-Host ""
+} else {
+    # When SkipTranscript is used, batch wrapper handles logging via Tee-Object
+    # Reference the batch log file pattern for error messages
+    $logFile = Join-Path $logDir "build-rl-batch-*.log"
+    Write-Host "Logging handled by batch wrapper" -ForegroundColor Gray
     Write-Host ""
 }
 
@@ -77,10 +127,11 @@ Write-Host "Build Configuration:" -ForegroundColor Cyan
 Write-Host "  Generator: $generator" -ForegroundColor White
 Write-Host "  Architecture: $Architecture" -ForegroundColor White
 Write-Host "  Configuration: $Config" -ForegroundColor White
+Write-Host "  Library Type: $(if ($BuildStatic) { 'Static' } else { 'Shared' })" -ForegroundColor White
 Write-Host "  Install Prefix: $InstallPrefix" -ForegroundColor White
 Write-Host "  Third-Party Prefix: $ThirdPartyPrefix" -ForegroundColor White
 Write-Host "  Parallel Jobs: $(if ($ParallelJobs -eq 0) { 'All available' } else { $ParallelJobs })" -ForegroundColor White
-Write-Host "  Build Shared Libraries (DLLs): $BuildSharedLibs" -ForegroundColor White
+Write-Host "  Clean Previous: $(if ($Clean) { 'Yes' } else { 'No' })" -ForegroundColor White
 Write-Host "  Build Demos: $BuildDemos" -ForegroundColor White
 Write-Host "  Build Extras: $BuildExtras" -ForegroundColor White
 Write-Host "  Build Math: $BuildMath" -ForegroundColor White
@@ -90,7 +141,7 @@ Write-Host "  Build XML: $BuildXml" -ForegroundColor White
 Write-Host ""
 
 # Create build directory
-$buildDir = Join-Path $PSScriptRoot "build"
+$buildDir = Join-Path $RLRoot "build"
 if (-not (Test-Path $buildDir)) {
     Write-Host "Creating build directory: $buildDir" -ForegroundColor Yellow
     New-Item -ItemType Directory -Path $buildDir | Out-Null
@@ -109,7 +160,7 @@ try {
         "-DCMAKE_INSTALL_PREFIX=`"$InstallPrefix`""
         "-DCMAKE_BUILD_TYPE=$Config"
         "-DCMAKE_PREFIX_PATH=`"$ThirdPartyPrefix`""
-        "-DBUILD_SHARED_LIBS=$(if ($BuildSharedLibs) { 'ON' } else { 'OFF' })"
+        "-DBUILD_SHARED_LIBS=$(if ($BuildStatic) { 'OFF' } else { 'ON' })"
         "-DRL_BUILD_DEMOS=$(if ($BuildDemos) { 'ON' } else { 'OFF' })"
         "-DRL_BUILD_EXTRAS=$(if ($BuildExtras) { 'ON' } else { 'OFF' })"
         "-DRL_BUILD_MATH=$(if ($BuildMath) { 'ON' } else { 'OFF' })"
@@ -119,11 +170,28 @@ try {
     )
     
     Write-Host "Running: cmake $($cmakeArgs -join ' ')" -ForegroundColor Gray
-    & cmake @cmakeArgs 2>&1
+    
+    # Temporarily change error action to continue to capture full CMake output
+    $oldErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    
+    # Capture CMake output
+    $cmakeOutput = & cmake @cmakeArgs 2>&1
+    $cmakeOutput | ForEach-Object { Write-Host $_ }
+    
+    # Restore error action
+    $ErrorActionPreference = $oldErrorAction
     
     if ($LASTEXITCODE -ne 0) {
+        Write-Host "" -ForegroundColor Red
         Write-Host "ERROR: CMake configuration failed!" -ForegroundColor Red
-        Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+        Write-Host "Full CMake error output:" -ForegroundColor Yellow
+        $cmakeOutput | Select-Object -Last 30 | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
+        if ($SkipTranscript) {
+            Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
+        } else {
+            Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+        }
         exit 1
     }
     
@@ -149,7 +217,11 @@ try {
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "ERROR: Build failed!" -ForegroundColor Red
-            Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+            if ($SkipTranscript) {
+                Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
+            } else {
+                Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+            }
             exit 1
         }
         
@@ -174,7 +246,11 @@ try {
         
         if ($LASTEXITCODE -ne 0) {
             Write-Host "WARNING: Install failed, but build artifacts are in the build directory" -ForegroundColor Yellow
-            Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+            if ($SkipTranscript) {
+                Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
+            } else {
+                Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+            }
         } else {
             Write-Host "Installation successful!" -ForegroundColor Green
             Write-Host ""
@@ -191,6 +267,9 @@ try {
     Write-Host ""
     if ($transcriptStarted) {
         Write-Host "Build log saved to: $logFile" -ForegroundColor Gray
+        Write-Host ""
+    } elseif ($SkipTranscript) {
+        Write-Host "Build log saved to batch log file in: $logDir" -ForegroundColor Gray
         Write-Host ""
     }
     
