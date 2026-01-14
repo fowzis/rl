@@ -8,6 +8,7 @@ REM   build-rl.bat                    - Build shared libraries (default)
 REM   build-rl.bat -BuildStatic      - Build static libraries
 REM   build-rl.bat -Clean -BuildStatic - Clean previous build and build static libraries
 REM   build-rl.bat -BuildStatic -Config Debug -Architecture x64
+REM   build-rl.bat -BuildDocumentation - Build with Doxygen documentation (requires Doxygen)
 
 set SCRIPT_DIR=%~dp0
 set LOG_DIR=%SCRIPT_DIR%..\logs

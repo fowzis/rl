@@ -1,5 +1,5 @@
 # PowerShell script to build Robotics Library (RL)
-# Usage: .\build-rl.ps1 [-InstallPrefix <path>] [-ThirdPartyPrefix <path>] [-VisualStudioVersion <version>] [-Architecture <x64|x86>] [-Config <Release|Debug>] [-BuildStatic] [-Clean]
+# Usage: .\build-rl.ps1 [-InstallPrefix <path>] [-ThirdPartyPrefix <path>] [-VisualStudioVersion <version>] [-Architecture <x64|x86>] [-Config <Release|Debug>] [-BuildStatic] [-Clean] [-BuildDocumentation]
 
 param(
     [string]$InstallPrefix = "",
@@ -20,10 +20,25 @@ param(
     [switch]$BuildTests = $false,
     [switch]$BuildUtil = $true,
     [switch]$BuildXml = $true,
+    [switch]$BuildDocumentation = $false,  # Build Doxygen documentation (requires Doxygen to be installed)
     [switch]$SkipTranscript  # Skip Start-Transcript when called from batch wrapper
 )
 
 $ErrorActionPreference = "Stop"
+
+# Determine the root directory of the RL project (parent of scripts directory)
+# $PSScriptRoot is the directory where this script is located
+$RLRoot = Split-Path -Parent $PSScriptRoot
+
+# Set default third-party prefix if not provided (parent of RL root + rl-3rdparty/install)
+if ([string]::IsNullOrEmpty($ThirdPartyPrefix)) {
+    $ThirdPartyPrefix = Join-Path (Split-Path -Parent $RLRoot) "rl-3rdparty\install"
+}
+
+# Set default install prefix if not provided
+if ([string]::IsNullOrEmpty($InstallPrefix)) {
+    $InstallPrefix = Join-Path $RLRoot "install"
+}
 
 # Clean previous build, install, and logs if requested (do this BEFORE starting transcript)
 if ($Clean) {
@@ -36,7 +51,8 @@ if ($Clean) {
         Remove-Item -Path $buildDir -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path $buildDir) {
             Write-Host "  WARNING: Could not fully remove build directory. Some files may be locked." -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "  Build directory removed." -ForegroundColor Green
         }
     }
@@ -47,7 +63,8 @@ if ($Clean) {
         Remove-Item -Path $InstallPrefix -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path $InstallPrefix) {
             Write-Host "  WARNING: Could not fully remove install directory. Some files may be locked." -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "  Install directory removed." -ForegroundColor Green
         }
     }
@@ -59,7 +76,8 @@ if ($Clean) {
         Remove-Item -Path $logDir -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path $logDir) {
             Write-Host "  WARNING: Could not fully remove logs directory. Some files may be locked." -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "  Logs directory removed." -ForegroundColor Green
         }
     }
@@ -69,7 +87,7 @@ if ($Clean) {
 }
 
 # Setup logging (after cleanup)
-    $logDir = Join-Path $RLRoot "logs"
+$logDir = Join-Path $RLRoot "logs"
 if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir | Out-Null
 }
@@ -83,7 +101,8 @@ if (-not $SkipTranscript) {
     $transcriptStarted = $true
     Write-Host "Logging output to: $logFile" -ForegroundColor Gray
     Write-Host ""
-} else {
+}
+else {
     # When SkipTranscript is used, batch wrapper handles logging via Tee-Object
     # Reference the batch log file pattern for error messages
     $logFile = Join-Path $logDir "build-rl-batch-*.log"
@@ -107,9 +126,10 @@ Write-Host "Found: $cmakeVersion" -ForegroundColor Green
 
 # Verify third-party dependencies exist
 Write-Host "Checking third-party dependencies..." -ForegroundColor Yellow
-if (-not (Test-Path $ThirdPartyPrefix)) {
+if ([string]::IsNullOrEmpty($ThirdPartyPrefix) -or -not (Test-Path $ThirdPartyPrefix)) {
     Write-Host "ERROR: Third-party dependencies not found at: $ThirdPartyPrefix" -ForegroundColor Red
     Write-Host "Please build rl-3rdparty first using build-3rdparty.ps1" -ForegroundColor Yellow
+    Write-Host "Or specify a custom path using -ThirdPartyPrefix parameter" -ForegroundColor Yellow
     exit 1
 }
 Write-Host "Found third-party dependencies at: $ThirdPartyPrefix" -ForegroundColor Green
@@ -119,7 +139,8 @@ Write-Host ""
 $generator = "Visual Studio $VisualStudioVersion 2022"
 if ($VisualStudioVersion -eq "16") {
     $generator = "Visual Studio 16 2019"
-} elseif ($VisualStudioVersion -eq "15") {
+}
+elseif ($VisualStudioVersion -eq "15") {
     $generator = "Visual Studio 15 2017"
 }
 
@@ -138,6 +159,7 @@ Write-Host "  Build Math: $BuildMath" -ForegroundColor White
 Write-Host "  Build Tests: $BuildTests" -ForegroundColor White
 Write-Host "  Build Util: $BuildUtil" -ForegroundColor White
 Write-Host "  Build XML: $BuildXml" -ForegroundColor White
+Write-Host "  Build Documentation: $BuildDocumentation" -ForegroundColor White
 Write-Host ""
 
 # Create build directory
@@ -167,6 +189,7 @@ try {
         "-DRL_BUILD_TESTS=$(if ($BuildTests) { 'ON' } else { 'OFF' })"
         "-DRL_BUILD_UTIL=$(if ($BuildUtil) { 'ON' } else { 'OFF' })"
         "-DRL_BUILD_XML=$(if ($BuildXml) { 'ON' } else { 'OFF' })"
+        "-DRL_BUILD_DOCUMENTATION=$(if ($BuildDocumentation) { 'ON' } else { 'OFF' })"
     )
     
     Write-Host "Running: cmake $($cmakeArgs -join ' ')" -ForegroundColor Gray
@@ -189,7 +212,8 @@ try {
         $cmakeOutput | Select-Object -Last 30 | ForEach-Object { Write-Host $_ -ForegroundColor Yellow }
         if ($SkipTranscript) {
             Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
         }
         exit 1
@@ -208,7 +232,8 @@ try {
         
         if ($ParallelJobs -gt 0) {
             $buildArgs += "--parallel", $ParallelJobs
-        } else {
+        }
+        else {
             $buildArgs += "--parallel"
         }
         
@@ -219,7 +244,8 @@ try {
             Write-Host "ERROR: Build failed!" -ForegroundColor Red
             if ($SkipTranscript) {
                 Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
-            } else {
+            }
+            else {
                 Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
             }
             exit 1
@@ -227,7 +253,42 @@ try {
         
         Write-Host "Build successful!" -ForegroundColor Green
         Write-Host ""
-    } else {
+        
+        # Build documentation if requested
+        if ($BuildDocumentation) {
+            Write-Host "Building documentation..." -ForegroundColor Yellow
+            $docArgs = @(
+                "--build", "."
+                "--config", $Config
+                "--target", "doc"
+            )
+            
+            Write-Host "Running: cmake $($docArgs -join ' ')" -ForegroundColor Gray
+            $docOutput = & cmake @docArgs 2>&1
+            $docOutput | ForEach-Object { Write-Host $_ }
+            
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "WARNING: Documentation build failed!" -ForegroundColor Yellow
+                Write-Host "Make sure Doxygen is installed and available in PATH." -ForegroundColor Yellow
+                Write-Host "Documentation will not be available, but the library build was successful." -ForegroundColor Yellow
+                if ($SkipTranscript) {
+                    Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
+                }
+                else {
+                    Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
+                }
+            }
+            else {
+                Write-Host "Documentation build successful!" -ForegroundColor Green
+                $docHtmlPath = Join-Path $buildDir "doc\html\index.html"
+                if (Test-Path $docHtmlPath) {
+                    Write-Host "Documentation available at: $docHtmlPath" -ForegroundColor Green
+                }
+                Write-Host ""
+            }
+        }
+    }
+    else {
         Write-Host "Skipping build (--SkipBuild specified)" -ForegroundColor Yellow
         Write-Host ""
     }
@@ -248,15 +309,18 @@ try {
             Write-Host "WARNING: Install failed, but build artifacts are in the build directory" -ForegroundColor Yellow
             if ($SkipTranscript) {
                 Write-Host "See batch log file in: $logDir" -ForegroundColor Yellow
-            } else {
+            }
+            else {
                 Write-Host "See log file for details: $logFile" -ForegroundColor Yellow
             }
-        } else {
+        }
+        else {
             Write-Host "Installation successful!" -ForegroundColor Green
             Write-Host ""
             Write-Host "Robotics Library installed to: $InstallPrefix" -ForegroundColor Green
         }
-    } else {
+    }
+    else {
         Write-Host "Skipping install (--SkipInstall specified)" -ForegroundColor Yellow
     }
     
@@ -268,12 +332,14 @@ try {
     if ($transcriptStarted) {
         Write-Host "Build log saved to: $logFile" -ForegroundColor Gray
         Write-Host ""
-    } elseif ($SkipTranscript) {
+    }
+    elseif ($SkipTranscript) {
         Write-Host "Build log saved to batch log file in: $logDir" -ForegroundColor Gray
         Write-Host ""
     }
     
-} finally {
+}
+finally {
     Pop-Location
     if ($transcriptStarted) {
         Stop-Transcript | Out-Null

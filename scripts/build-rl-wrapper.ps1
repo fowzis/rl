@@ -17,8 +17,8 @@ $logFile = Join-Path $logDir "build-rl-batch-$timestamp.log"
 Write-Host "Batch log: $logFile"
 
 # Get the script directory
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$scriptPath = Join-Path $scriptDir "build-rl.ps1"
+# $PSScriptRoot is the directory where this script is located
+$scriptPath = Join-Path $PSScriptRoot "build-rl.ps1"
 
 # Get all remaining arguments (skip the first one which is the log directory)
 $scriptArgs = @()
