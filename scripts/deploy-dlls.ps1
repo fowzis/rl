@@ -241,7 +241,7 @@ if (Test-Path $RL3rdPartyBinDir) {
 
 Write-Host ""
 
-Write-Host "Step 4: Detecting and copying Qt DLLs..." -ForegroundColor Cyan
+Write-Host "Step 4: Detecting Qt installation (Qt DLLs not copied - needed for GUI applications)..." -ForegroundColor Cyan
 
 # Check if SoQt was built with Qt5 or Qt6 by reading the config file
 $soqtConfigFile = Join-Path $Source3rdParty "install\lib\cmake\SoQt-1.6.3\soqt-config.cmake"
@@ -274,14 +274,46 @@ if (Test-Path $soqtExportFile) {
     }
 }
 
-# Auto-include Qt if SoQt needs it, or if explicitly requested
-$shouldCopyQt = $IncludeQt -or $QtPath -or $needsQt5 -or $needsQt6
+# Try to find Qt installation (for detection only, not copying)
+$QtBinDir = $null
 
-if ($shouldCopyQt) {
-    if ($QtPath) {
-        $QtBinDir = Join-Path $QtPath "bin"
-    } else {
-        # Try to find Qt in common locations
+if ($QtPath) {
+    $QtBinDir = Join-Path $QtPath "bin"
+} else {
+    # First check environment variables (Qt5_DIR or Qt6_DIR)
+    if ($needsQt5 -and $env:Qt5_DIR) {
+        # Qt5_DIR points to lib\cmake\Qt5, need to go up to get to bin
+        # e.g., C:\Tools\Qt\5.15.2\msvc2019_64\lib\cmake\Qt5 -> C:\Tools\Qt\5.15.2\msvc2019_64\bin
+        $qt5Dir = $env:Qt5_DIR
+        if ($qt5Dir -match '\\lib\\cmake\\Qt5') {
+            $QtBinDir = Join-Path (Split-Path (Split-Path (Split-Path $qt5Dir -Parent) -Parent) -Parent) "bin"
+        } else {
+            $QtBinDir = Join-Path $qt5Dir "bin"
+        }
+        if (Test-Path $QtBinDir) {
+            Write-Host "  Found Qt5 via Qt5_DIR environment variable: $QtBinDir" -ForegroundColor Green
+        } else {
+            $QtBinDir = $null
+        }
+    }
+    
+    if (-not $QtBinDir -and $needsQt6 -and $env:Qt6_DIR) {
+        # Qt6_DIR points to lib\cmake\Qt6, need to go up to get to bin
+        $qt6Dir = $env:Qt6_DIR
+        if ($qt6Dir -match '\\lib\\cmake\\Qt6') {
+            $QtBinDir = Join-Path (Split-Path (Split-Path (Split-Path $qt6Dir -Parent) -Parent) -Parent) "bin"
+        } else {
+            $QtBinDir = Join-Path $qt6Dir "bin"
+        }
+        if (Test-Path $QtBinDir) {
+            Write-Host "  Found Qt6 via Qt6_DIR environment variable: $QtBinDir" -ForegroundColor Green
+        } else {
+            $QtBinDir = $null
+        }
+    }
+    
+    # If not found via environment variables, try common locations
+    if (-not $QtBinDir) {
         $possibleQtPaths = @(
             "C:\Qt",
             "C:\Qt5",
@@ -290,7 +322,6 @@ if ($shouldCopyQt) {
             "${env:ProgramFiles(x86)}\Qt"
         )
         
-        $QtBinDir = $null
         $preferredQtVersion = if ($needsQt5) { "5" } elseif ($needsQt6) { "6" } else { $null }
         
         foreach ($path in $possibleQtPaths) {
@@ -314,7 +345,7 @@ if ($shouldCopyQt) {
                         if ($compilers) {
                             # Prefer msvc compiler variants
                             $msvcCompiler = $compilers | Where-Object { $_.Name -match "msvc" } | Select-Object -First 1
-                            $selectedCompiler = if ($msvcCompiler) { $msvcCompiler } else { $compilers[0] }
+                            $selectedCompiler = if ($msvcCompiler) { $msvcCompiler} else { $compilers[0] }
                             
                             $testQtBinDir = Join-Path $selectedCompiler.FullName "bin"
                             if (Test-Path $testQtBinDir) {
@@ -355,122 +386,20 @@ if ($shouldCopyQt) {
             }
         }
     }
-    
-    if ($QtBinDir -and (Test-Path $QtBinDir)) {
-        # Determine which Qt version to copy based on what SoQt needs
-        $requiredQtDlls = @()
-        
-        if ($needsQt5) {
-            Write-Host "  Copying Qt5 DLLs..." -ForegroundColor Cyan
-            # Core Qt5 DLLs required by SoQt and rlsg.dll
-            $requiredQtDlls += @(
-                "Qt5Core.dll",
-                "Qt5Gui.dll",
-                "Qt5OpenGL.dll",
-                "Qt5PrintSupport.dll",
-                "Qt5Widgets.dll",
-                "Qt5Network.dll"
-            )
-        }
-        
-        if ($needsQt6) {
-            Write-Host "  Copying Qt6 DLLs..." -ForegroundColor Cyan
-            $requiredQtDlls += @(
-                "Qt6Core.dll",
-                "Qt6Gui.dll",
-                "Qt6OpenGL.dll",
-                "Qt6PrintSupport.dll",
-                "Qt6Widgets.dll",
-                "Qt6Network.dll"
-            )
-        }
-        
-        # If neither was detected but Qt was requested, try both
-        if (-not $needsQt5 -and -not $needsQt6 -and ($IncludeQt -or $QtPath)) {
-            Write-Host "  Qt version not detected, trying Qt5 first..." -ForegroundColor Yellow
-            $requiredQtDlls = @(
-                "Qt5Core.dll",
-                "Qt5Gui.dll",
-                "Qt5OpenGL.dll",
-                "Qt5PrintSupport.dll",
-                "Qt5Widgets.dll",
-                "Qt5Network.dll"
-            )
-        }
-        
-        $qtCopied = 0
-        foreach ($dll in $requiredQtDlls) {
-            $sourcePath = Join-Path $QtBinDir $dll
-            $destPath = Join-Path $DeployDir $dll
-            if (Copy-IfExists -SourcePath $sourcePath -DestPath $destPath -Description "Qt: $dll") {
-                $qtCopied++
-                $dllCount++
-            }
-        }
-        
-        if ($qtCopied -eq 0) {
-            Write-Host "  [WARNING] No Qt DLLs found. rlsg.dll may not work correctly." -ForegroundColor Yellow
-        } else {
-            Write-Host "  [OK] Copied $qtCopied Qt DLLs" -ForegroundColor Green
-            
-            # Copy Qt platform plugins (required for GUI applications using rlsg.dll)
-            $pluginsDir = Join-Path $QtBinDir "..\plugins\platforms"
-            if (Test-Path $pluginsDir) {
-                $pluginsDest = Join-Path $DeployDir "platforms"
-                if (-not (Test-Path $pluginsDest)) {
-                    New-Item -ItemType Directory -Path $pluginsDest -Force | Out-Null
-                }
-                $pluginFiles = Get-ChildItem -Path "$pluginsDir\*.dll" -ErrorAction SilentlyContinue
-                foreach ($plugin in $pluginFiles) {
-                    Copy-Item -Path $plugin.FullName -Destination $pluginsDest -Force -ErrorAction SilentlyContinue
-                }
-                if ($pluginFiles) {
-                    Write-Host "  [OK] Copied $($pluginFiles.Count) Qt platform plugin(s)" -ForegroundColor Green
-                }
-            }
-            
-            # Copy ALL Qt DLLs to ensure all dependencies are met
-            Write-Host "  Copying all Qt DLLs (to ensure all dependencies are met)..." -ForegroundColor Cyan
-            $allQtDlls = Get-ChildItem -Path $QtBinDir -Filter "Qt5*.dll" -ErrorAction SilentlyContinue
-            if ($needsQt6) {
-                $allQtDlls += Get-ChildItem -Path $QtBinDir -Filter "Qt6*.dll" -ErrorAction SilentlyContinue
-            }
-            $additionalCount = 0
-            foreach ($dll in $allQtDlls) {
-                $destPath = Join-Path $DeployDir $dll.Name
-                if (-not (Test-Path $destPath)) {
-                    try {
-                        Copy-Item -Path $dll.FullName -Destination $destPath -Force -ErrorAction Stop
-                        $additionalCount++
-                    } catch {
-                        Write-Host "    [WARNING] Failed to copy $($dll.Name): $_" -ForegroundColor Yellow
-                    }
-                }
-            }
-            if ($additionalCount -gt 0) {
-                Write-Host "  [OK] Copied $additionalCount additional Qt DLLs" -ForegroundColor Green
-                $dllCount += $additionalCount
-            }
-        }
-    } else {
-        if ($needsQt5 -or $needsQt6) {
-            Write-Host "  [ERROR] Qt directory not found but is required!" -ForegroundColor Red
-            Write-Host "    SoQt was built with Qt, but Qt DLLs cannot be found." -ForegroundColor Red
-            Write-Host "    Please:" -ForegroundColor Yellow
-            Write-Host "    1. Install Qt5 or Qt6" -ForegroundColor Yellow
-            Write-Host "    2. Use -QtPath parameter to specify Qt installation path" -ForegroundColor Yellow
-            Write-Host "    3. Or use -IncludeQt to enable auto-detection" -ForegroundColor Yellow
-        } else {
-            Write-Host "  [WARNING] Qt directory not found. rlsg.dll may not work correctly." -ForegroundColor Yellow
-            Write-Host "    Use -QtPath parameter to specify Qt installation path" -ForegroundColor Yellow
-        }
-    }
+}
+
+# Note: Qt DLLs are NOT copied in deploy-dlls because they are needed for GUI applications
+# and should be deployed separately with the executables (use deploy-exe for that)
+if ($QtBinDir -and (Test-Path $QtBinDir)) {
+    Write-Host "  [OK] Qt installation detected at: $QtBinDir" -ForegroundColor Green
+    Write-Host "  Note: Qt DLLs are not copied here (needed for GUI - use deploy-exe to include them)" -ForegroundColor Yellow
 } else {
     if ($needsQt5 -or $needsQt6) {
-        Write-Host "  [WARNING] Qt is required but auto-copy is disabled!" -ForegroundColor Yellow
-        Write-Host "    Use -IncludeQt to automatically copy Qt DLLs" -ForegroundColor Yellow
+        Write-Host "  [WARNING] Qt installation not found but may be required!" -ForegroundColor Yellow
+        Write-Host "    SoQt was built with Qt, but Qt installation cannot be found." -ForegroundColor Yellow
+        Write-Host "    Set Qt5_DIR or Qt6_DIR environment variable, or use -QtPath parameter." -ForegroundColor Yellow
     } else {
-        Write-Host "  Skipped (use -IncludeQt to copy Qt DLLs)" -ForegroundColor Gray
+        Write-Host "  [INFO] Qt not required (SoQt was built without Qt)" -ForegroundColor Gray
     }
 }
 

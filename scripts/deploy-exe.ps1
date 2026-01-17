@@ -211,76 +211,111 @@ if ($shouldCopyQt) {
     if ($QtPath) {
         $QtBinDir = Join-Path $QtPath "bin"
     } else {
-        # Try to find Qt in common locations
-        $possibleQtPaths = @(
-            "C:\Qt",
-            "C:\Qt5",
-            "C:\Qt6",
-            "${env:ProgramFiles}\Qt",
-            "${env:ProgramFiles(x86)}\Qt"
-        )
-        
+        # First check environment variables (Qt5_DIR or Qt6_DIR)
         $QtBinDir = $null
-        $preferredQtVersion = if ($needsQt5) { "5" } elseif ($needsQt6) { "6" } else { $null }
         
-        foreach ($path in $possibleQtPaths) {
-            if (Test-Path $path) {
-                # Look for Qt version directories
-                $qtVersions = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | 
-                    Where-Object { $_.Name -match "^[0-9]" } | 
-                    Sort-Object Name -Descending
-                
-                if ($qtVersions) {
-                    # If we know which Qt version we need, prefer that
-                    if ($preferredQtVersion) {
-                        $matchingVersion = $qtVersions | Where-Object { $_.Name.StartsWith($preferredQtVersion) } | Select-Object -First 1
-                        if ($matchingVersion) {
-                            $qtVersions = @($matchingVersion)
-                        }
-                    }
-                    
-                    foreach ($qtVersion in $qtVersions) {
-                        $compilers = Get-ChildItem -Path $qtVersion.FullName -Directory -ErrorAction SilentlyContinue
-                        if ($compilers) {
-                            # Prefer msvc compiler variants
-                            $msvcCompiler = $compilers | Where-Object { $_.Name -match "msvc" } | Select-Object -First 1
-                            $selectedCompiler = if ($msvcCompiler) { $msvcCompiler } else { $compilers[0] }
-                            
-                            $testQtBinDir = Join-Path $selectedCompiler.FullName "bin"
-                            if (Test-Path $testQtBinDir) {
-                                # Verify it has the required DLLs
-                                $hasRequiredDlls = $true
-                                if ($needsQt5) {
-                                    $hasRequiredDlls = (Test-Path (Join-Path $testQtBinDir "Qt5Core.dll"))
-                                } elseif ($needsQt6) {
-                                    $hasRequiredDlls = (Test-Path (Join-Path $testQtBinDir "Qt6Core.dll"))
-                                }
-                                
-                                if ($hasRequiredDlls) {
-                                    $QtBinDir = $testQtBinDir
-                                    Write-Host "  Found Qt at: $QtBinDir" -ForegroundColor Green
-                                    break
-                                }
-                            }
-                        }
-                    }
-                    
-                    if ($QtBinDir) {
-                        break
-                    }
-                }
+        if ($needsQt5 -and $env:Qt5_DIR) {
+            # Qt5_DIR points to lib\cmake\Qt5, need to go up to get to bin
+            # e.g., C:\Tools\Qt\5.15.2\msvc2019_64\lib\cmake\Qt5 -> C:\Tools\Qt\5.15.2\msvc2019_64\bin
+            $qt5Dir = $env:Qt5_DIR
+            if ($qt5Dir -match '\\lib\\cmake\\Qt5') {
+                $QtBinDir = Join-Path (Split-Path (Split-Path (Split-Path $qt5Dir -Parent) -Parent) -Parent) "bin"
+            } else {
+                $QtBinDir = Join-Path $qt5Dir "bin"
+            }
+            if (Test-Path $QtBinDir) {
+                Write-Host "  Found Qt5 via Qt5_DIR environment variable: $QtBinDir" -ForegroundColor Green
+            } else {
+                $QtBinDir = $null
             }
         }
         
-        # Also check PATH for Qt
+        if (-not $QtBinDir -and $needsQt6 -and $env:Qt6_DIR) {
+            # Qt6_DIR points to lib\cmake\Qt6, need to go up to get to bin
+            $qt6Dir = $env:Qt6_DIR
+            if ($qt6Dir -match '\\lib\\cmake\\Qt6') {
+                $QtBinDir = Join-Path (Split-Path (Split-Path (Split-Path $qt6Dir -Parent) -Parent) -Parent) "bin"
+            } else {
+                $QtBinDir = Join-Path $qt6Dir "bin"
+            }
+            if (Test-Path $QtBinDir) {
+                Write-Host "  Found Qt6 via Qt6_DIR environment variable: $QtBinDir" -ForegroundColor Green
+            } else {
+                $QtBinDir = $null
+            }
+        }
+        
+        # If not found via environment variables, try common locations
         if (-not $QtBinDir) {
-            $pathQt = Get-Command "qmake.exe" -ErrorAction SilentlyContinue
-            if ($pathQt) {
-                $qmakePath = $pathQt.Source
-                $possibleQtBin = Join-Path (Split-Path (Split-Path $qmakePath -Parent) -Parent) "bin"
-                if (Test-Path $possibleQtBin) {
-                    $QtBinDir = $possibleQtBin
-                    Write-Host "  Found Qt via PATH at: $QtBinDir" -ForegroundColor Green
+            $possibleQtPaths = @(
+                "C:\Qt",
+                "C:\Qt5",
+                "C:\Qt6",
+                "${env:ProgramFiles}\Qt",
+                "${env:ProgramFiles(x86)}\Qt"
+            )
+            
+            $preferredQtVersion = if ($needsQt5) { "5" } elseif ($needsQt6) { "6" } else { $null }
+            
+            foreach ($path in $possibleQtPaths) {
+                if (Test-Path $path) {
+                    # Look for Qt version directories
+                    $qtVersions = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue | 
+                        Where-Object { $_.Name -match "^[0-9]" } | 
+                        Sort-Object Name -Descending
+                    
+                    if ($qtVersions) {
+                        # If we know which Qt version we need, prefer that
+                        if ($preferredQtVersion) {
+                            $matchingVersion = $qtVersions | Where-Object { $_.Name.StartsWith($preferredQtVersion) } | Select-Object -First 1
+                            if ($matchingVersion) {
+                                $qtVersions = @($matchingVersion)
+                            }
+                        }
+                        
+                        foreach ($qtVersion in $qtVersions) {
+                            $compilers = Get-ChildItem -Path $qtVersion.FullName -Directory -ErrorAction SilentlyContinue
+                            if ($compilers) {
+                                # Prefer msvc compiler variants
+                                $msvcCompiler = $compilers | Where-Object { $_.Name -match "msvc" } | Select-Object -First 1
+                                $selectedCompiler = if ($msvcCompiler) { $msvcCompiler } else { $compilers[0] }
+                                
+                                $testQtBinDir = Join-Path $selectedCompiler.FullName "bin"
+                                if (Test-Path $testQtBinDir) {
+                                    # Verify it has the required DLLs
+                                    $hasRequiredDlls = $true
+                                    if ($needsQt5) {
+                                        $hasRequiredDlls = (Test-Path (Join-Path $testQtBinDir "Qt5Core.dll"))
+                                    } elseif ($needsQt6) {
+                                        $hasRequiredDlls = (Test-Path (Join-Path $testQtBinDir "Qt6Core.dll"))
+                                    }
+                                    
+                                    if ($hasRequiredDlls) {
+                                        $QtBinDir = $testQtBinDir
+                                        Write-Host "  Found Qt at: $QtBinDir" -ForegroundColor Green
+                                        break
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if ($QtBinDir) {
+                            break
+                        }
+                    }
+                }
+            }
+            
+            # Also check PATH for Qt
+            if (-not $QtBinDir) {
+                $pathQt = Get-Command "qmake.exe" -ErrorAction SilentlyContinue
+                if ($pathQt) {
+                    $qmakePath = $pathQt.Source
+                    $possibleQtBin = Join-Path (Split-Path (Split-Path $qmakePath -Parent) -Parent) "bin"
+                    if (Test-Path $possibleQtBin) {
+                        $QtBinDir = $possibleQtBin
+                        Write-Host "  Found Qt via PATH at: $QtBinDir" -ForegroundColor Green
+                    }
                 }
             }
         }
